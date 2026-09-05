@@ -1,10 +1,10 @@
-name: Build Signed Screener APK
+name: Build and Release Screener APK
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-android:
@@ -50,7 +50,7 @@ jobs:
         run: |
           echo "$KEYSTORE_BASE64" | base64 --decode > android/screener-release.keystore
 
-      - name: Configure Android release signing
+      - name: Configure release signing
         env:
           KEYSTORE_PASSWORD: ${{ secrets.PRADEEP }}
         run: |
@@ -76,20 +76,21 @@ jobs:
                   raise SystemExit("Could not find buildTypes block")
               text = text.replace(marker, signing + marker, 1)
 
-          marker = "    buildTypes {"
-          start = text.find(marker)
-          if start == -1:
-              raise SystemExit("Could not find buildTypes block")
-
+          start = text.find("    buildTypes {")
           release_pos = text.find("        release {", start)
+
           if release_pos == -1:
               raise SystemExit("Could not find release build type")
 
-          signing_line = "            signingConfig signingConfigs.release\n"
+          section = text[release_pos:release_pos + 700]
 
-          after_release = release_pos + len("        release {\n")
-          if "signingConfig signingConfigs.release" not in text[release_pos:release_pos + 500]:
-              text = text[:after_release] + signing_line + text[after_release:]
+          if "signingConfig signingConfigs.release" not in section:
+              insert_at = release_pos + len("        release {\n")
+              text = (
+                  text[:insert_at]
+                  + "            signingConfig signingConfigs.release\n"
+                  + text[insert_at:]
+              )
 
           path.write_text(text)
           PY
@@ -107,9 +108,14 @@ jobs:
           ls -lh android/app/build/outputs/apk/release/
           test -f android/app/build/outputs/apk/release/app-release.apk
 
-      - name: Upload signed APK
-        uses: actions/upload-artifact@v4
+      - name: Remove keystore
+        run: |
+          rm -f android/screener-release.keystore
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: screener-release-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 30
+          tag_name: v1.0.${{ github.run_number }}
+          name: Screener Android v1.0.${{ github.run_number }}
+          generate_release_notes: true
+          files: android/app/build/outputs/apk/release/app-release.apk
