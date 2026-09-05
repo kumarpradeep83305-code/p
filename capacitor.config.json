@@ -1,0 +1,6 @@
+{
+  "appId": "com.pradeep.screener",
+  "appName": "Screener",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
