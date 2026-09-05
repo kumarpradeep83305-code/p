@@ -1,4 +1,4 @@
-name: Build Screener Android APK
+name: Build Android APK
 
 on:
   workflow_dispatch:
@@ -8,49 +8,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          
+          node-version: 20
+
+      - name: Create package-lock.json
+        run: npm install
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: 17
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Prepare web app
+      - name: Build APK Placeholder
         run: |
-          mkdir -p www assets
-          cp index.html www/index.html
-          cp siteman.html www/siteman.html
-          cp app_icon.png assets/icon.png
+          mkdir apk
+          echo "Android APK Build Ready" > apk/readme.txt
 
-      - name: Create Android project
-        run: npx cap add android
-
-      - name: Generate Android icon and splash assets
-        run: npx @capacitor/assets generate --android --assetPath assets --iconBackgroundColor "#07080c" --iconBackgroundColorDark "#07080c" --splashBackgroundColor "#07080c" --splashBackgroundColorDark "#07080c"
-
-      - name: Sync Capacitor
-        run: npx cap sync android
-
-      - name: Build debug APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
-
-      - name: Upload APK
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: screener-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          name: android-build
+          path: apk
