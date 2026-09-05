@@ -1,36 +1,115 @@
-name: Generate Screener Signing Key
+name: Build Signed Screener APK
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  generate-keystore:
+  build-android:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
-      - name: Generate release keystore
-        env:
-          STORE_PASSWORD: ${{ secrets.PRADEEP }}
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prepare web app
         run: |
-          keytool -genkeypair \
-            -v \
-            -keystore screener-release.keystore \
-            -alias screener \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass "$STORE_PASSWORD" \
-            -keypass "$STORE_PASSWORD" \
-            -dname "CN=Screener, OU=App, O=Pradeep, L=India, ST=India, C=IN"
+          mkdir -p www assets
+          cp index.html www/index.html
+          cp siteman.html www/siteman.html
+          cp app_icon.png assets/icon.png
 
-      - name: Upload signing keystore
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Generate Android app icon
+        run: npx capacitor-assets generate --android --assetPath assets
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Restore release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/screener-release.keystore
+
+      - name: Configure Android release signing
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.PRADEEP }}
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("android/app/build.gradle")
+          text = path.read_text()
+
+          if "signingConfigs {" not in text:
+              marker = "    buildTypes {"
+              signing = """    signingConfigs {
+                  release {
+                      storeFile file("../screener-release.keystore")
+                      storePassword System.getenv("KEYSTORE_PASSWORD")
+                      keyAlias "screener"
+                      keyPassword System.getenv("KEYSTORE_PASSWORD")
+                  }
+              }
+
+          """
+              if marker not in text:
+                  raise SystemExit("Could not find buildTypes block")
+              text = text.replace(marker, signing + marker, 1)
+
+          marker = "    buildTypes {"
+          start = text.find(marker)
+          if start == -1:
+              raise SystemExit("Could not find buildTypes block")
+
+          release_pos = text.find("        release {", start)
+          if release_pos == -1:
+              raise SystemExit("Could not find release build type")
+
+          signing_line = "            signingConfig signingConfigs.release\n"
+
+          after_release = release_pos + len("        release {\n")
+          if "signingConfig signingConfigs.release" not in text[release_pos:release_pos + 500]:
+              text = text[:after_release] + signing_line + text[after_release:]
+
+          path.write_text(text)
+          PY
+
+      - name: Build signed release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.PRADEEP }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Verify APK
+        run: |
+          ls -lh android/app/build/outputs/apk/release/
+          test -f android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: screener-signing-keystore
-          path: screener-release.keystore
+          name: screener-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
